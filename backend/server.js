@@ -280,6 +280,130 @@ app.post('/api/scan/fetch-data', async (req, res) => {
   }
 });
 
+// Multi-tool comparison endpoints
+app.get('/api/tools/comparison/:repoId', async (req, res) => {
+  try {
+    const ComparisonAnalyzer = require('../../multi-tool-scanner/comparison/analyzer');
+    const ResultStorage = require('../../multi-tool-scanner/database/storage');
+    
+    const storage = new ResultStorage(process.env.MONGODB_URI);
+    const analyzer = new ComparisonAnalyzer();
+    
+    await storage.connect();
+    const report = await analyzer.compareRepository(req.params.repoId, storage);
+    await storage.disconnect();
+    
+    res.json(report);
+  } catch (error) {
+    console.error('Error generating comparison:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/tools/analyses', async (req, res) => {
+  try {
+    const Analysis = require('../../database/models/Analysis');
+    
+    const filters = {};
+    if (req.query.tool_name) filters.tool_name = req.query.tool_name;
+    if (req.query.repository) filters.repository = req.query.repository;
+    
+    const analyses = await Analysis.find(filters)
+      .populate('repository')
+      .sort({ created_at: -1 })
+      .limit(parseInt(req.query.limit) || 50);
+    
+    res.json(analyses);
+  } catch (error) {
+    console.error('Error fetching tool analyses:', error);
+    res.json([]);
+  }
+});
+
+app.get('/api/tools/stats', async (req, res) => {
+  try {
+    const Analysis = require('../../database/models/Analysis');
+    const Alert = require('../../database/models/Alert');
+    
+    // Get counts by tool
+    const analysesByTool = await Analysis.aggregate([
+      { $group: { _id: '$tool_name', count: { $sum: 1 } } }
+    ]);
+    
+    // Get alerts by tool
+    const alertsByTool = await Alert.aggregate([
+      {
+        $lookup: {
+          from: 'analyses',
+          localField: 'analysis',
+          foreignField: '_id',
+          as: 'analysis_info'
+        }
+      },
+      { $unwind: '$analysis_info' },
+      {
+        $group: {
+          _id: '$analysis_info.tool_name',
+          count: { $sum: 1 },
+          by_severity: {
+            $push: '$security_severity'
+          }
+        }
+      }
+    ]);
+    
+    // Process severity counts
+    const stats = alertsByTool.map(tool => {
+      const severityCounts = {
+        critical: tool.by_severity.filter(s => s === 'critical').length,
+        high: tool.by_severity.filter(s => s === 'high').length,
+        medium: tool.by_severity.filter(s => s === 'medium').length,
+        low: tool.by_severity.filter(s => s === 'low').length
+      };
+      
+      return {
+        tool_name: tool._id,
+        total_alerts: tool.count,
+        by_severity: severityCounts
+      };
+    });
+    
+    res.json({
+      analyses_by_tool: analysesByTool,
+      alerts_by_tool: stats
+    });
+  } catch (error) {
+    console.error('Error fetching tool stats:', error);
+    res.json({ analyses_by_tool: [], alerts_by_tool: [] });
+  }
+});
+
+app.post('/api/tools/scan-local', async (req, res) => {
+  try {
+    res.json({ 
+      success: true, 
+      message: 'Multi-tool scan started in background',
+      timestamp: new Date().toISOString()
+    });
+    
+    // Run multi-tool scan asynchronously
+    const MultiToolScanner = require('../../multi-tool-scanner/index');
+    const scanner = new MultiToolScanner();
+    
+    const targetRepos = process.env.TARGET_REPOS?.split(',').map(r => r.trim()) || [];
+    
+    scanner.initialize()
+      .then(() => scanner.scanAll(targetRepos))
+      .then(() => scanner.cleanup())
+      .then(() => console.log('✅ Background multi-tool scan complete'))
+      .catch(error => console.error('❌ Background scan failed:', error));
+      
+  } catch (error) {
+    console.error('Error starting multi-tool scan:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);

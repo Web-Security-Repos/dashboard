@@ -5,6 +5,7 @@ import Overview from './pages/Overview';
 import Repositories from './pages/Repositories';
 import RepositoryDetail from './pages/RepositoryDetail';
 import Alerts from './pages/Alerts';
+import ToolComparison from './pages/ToolComparison';
 import './App.css';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
                 <Link to="/">Overview</Link>
                 <Link to="/repositories">Repositories</Link>
                 <Link to="/alerts">Alerts</Link>
+                <Link to="/comparison">Tool Comparison</Link>
               </div>
             </div>
           </div>
@@ -34,6 +36,7 @@ function App() {
             <Route path="/repositories" element={<Repositories />} />
             <Route path="/repositories/:id" element={<RepositoryDetail />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/comparison" element={<ToolComparison />} />
           </Routes>
         </main>
       </div>
